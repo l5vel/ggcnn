@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from skimage.draw import polygon
 from skimage.feature import peak_local_max
 
+import xml.etree.ElementTree as ET
 
 def _gr_text_to_no(l, offset=(0, 0)):
     """
@@ -107,6 +108,74 @@ class GraspRectangles:
         grs.scale(scale)
         return grs
 
+    @classmethod
+    def load_from_xml_file(cls, fname):
+        """
+        Load grasp rectangles from an XML dataset file.
+        :param fname: Path to the XML file.
+        :return: GraspRectangles()
+        """
+        grs = []
+
+        # Parse the XML file
+        tree = ET.parse(fname)
+        root = tree.getroot()
+
+        grs = cls.xml_to_gr(root)
+        grs = cls(grs)
+        return grs
+    
+    @classmethod
+    # ref: https://github.com/kmittle/Grasp-Detection-NBMOD/blob/main/data_preprocess/data_augmentation/label/original_img.py
+    def nbmod_center_to_vertice(cls, x, y, w, h, angle):  # 将抓取参数转化为抓取框用以显示
+        theta = angle
+        vertice = np.zeros((4, 2))
+        vertice[0] = (x - w / 2 * np.cos(theta) + h / 2 * np.sin(theta), y - w / 2 * np.sin(theta) - h / 2 * np.cos(theta))
+        vertice[1] = (x + w / 2 * np.cos(theta) + h / 2 * np.sin(theta), y + w / 2 * np.sin(theta) - h / 2 * np.cos(theta))
+        vertice[2] = (x + w / 2 * np.cos(theta) - h / 2 * np.sin(theta), y + w / 2 * np.sin(theta) + h / 2 * np.cos(theta))
+        vertice[3] = (x - w / 2 * np.cos(theta) - h / 2 * np.sin(theta), y - w / 2 * np.sin(theta) + h / 2 * np.cos(theta))
+        for i in range(0, 2):
+            for j in range(0, 4):
+                vertice[j][i] = round(vertice[j][i], 3)
+        return vertice
+    
+    @classmethod
+    # ref: https://github.com/kmittle/Grasp-Detection-NBMOD/blob/main/data_preprocess/data_augmentation/label/original_img.py
+    def xml_to_gr(cls, root):
+        grs = []
+        for obj2 in root.iter('object'):
+            # current = list()
+            # class_num = class_names.index(name)
+            xmlbox1 = obj2.find('robndbox')
+            x = xmlbox1.find('cx').text
+            y = xmlbox1.find('cy').text
+            width = xmlbox1.find('w').text
+            height = xmlbox1.find('h').text
+            angle = xmlbox1.find('angle').text
+            x = float(x)
+            x = x * 1
+            y = float(y)
+            y = y * 1
+            # print("prior: ", width, height)
+            width = float(width)
+            width = width * 1
+            height = float(height)
+            height = height * 1
+            # print("post: ", width, height)
+            angle = -float(angle)
+            if height > width:
+                exchange = width
+                width = height
+                height = exchange
+                angle = angle + 3.1415926/2
+                if angle >= 3.1415926:
+                    angle = angle - 3.1415926
+            # convert to vertex
+            gr_vertices = cls.nbmod_center_to_vertice(x, y, width, height, angle)
+            grs.append(GraspRectangle(np.array(gr_vertices)))
+        return grs
+
+
     def append(self, gr):
         """
         Add a grasp rectangle to this GraspRectangles object
@@ -182,7 +251,7 @@ class GraspRectangles:
         if pad_to:
            if pad_to > len(self.grs):
                a = np.concatenate((a, np.zeros((pad_to - len(self.grs), 4, 2))))
-        return a.astype(np.int)
+        return a.astype(np.int32)
 
     @property
     def center(self):
@@ -191,7 +260,7 @@ class GraspRectangles:
         :return: float, mean centre of all GraspRectangles
         """
         points = [gr.points for gr in self.grs]
-        return np.mean(np.vstack(points), axis=0).astype(np.int)
+        return np.mean(np.vstack(points), axis=0).astype(np.int32)
 
 
 class GraspRectangle:
@@ -225,7 +294,7 @@ class GraspRectangle:
         """
         :return: Rectangle center point
         """
-        return self.points.mean(axis=0).astype(np.int)
+        return self.points.mean(axis=0).astype(np.int32)
 
     @property
     def length(self):
@@ -271,7 +340,7 @@ class GraspRectangle:
 
         rr1, cc1 = self.polygon_coords()
         rr2, cc2 = polygon(gr.points[:, 0], gr.points[:, 1])
-
+        # print("rr1, cc1 rr2, cc2", rr1, cc1, rr2, cc2)
         try:
             r_max = max(rr1.max(), rr2.max()) + 1
             c_max = max(cc1.max(), cc2.max()) + 1
@@ -306,14 +375,16 @@ class GraspRectangle:
         :param angle: Angle to rotate (in radians)
         :param center: Point to rotate around (e.g. image center)
         """
-        R = np.array(
-            [
+        R = np.array([
                 [np.cos(-angle), np.sin(-angle)],
-                [-1 * np.sin(-angle), np.cos(-angle)],
-            ]
-        )
+                [-np.sin(-angle), np.cos(-angle)]
+            ])
+        # R = R.squeeze(-1)  # Removes the last dimension if it's size 1
+        assert R.shape == (2, 2), f"Rotation matrix R has incorrect shape: {R}"
         c = np.array(center).reshape((1, 2))
-        self.points = ((np.dot(R, (self.points - c).T)).T + c).astype(np.int)
+        # print((self.points).shape)
+        # print(R.shape)
+        self.points = ((np.dot(R, (self.points - c).T)).T + c).astype(np.int32)
 
     def scale(self, factor):
         """
@@ -345,7 +416,7 @@ class GraspRectangle:
             ]
         )
         c = np.array(center).reshape((1, 2))
-        self.points = ((np.dot(T, (self.points - c).T)).T + c).astype(np.int)
+        self.points = ((np.dot(T, (self.points - c).T)).T + c).astype(np.int32)
 
 
 class Grasp:
@@ -379,7 +450,7 @@ class Grasp:
              [y2 + self.width/2 * xo, x2 + self.width/2 * yo],
              [y1 + self.width/2 * xo, x1 + self.width/2 * yo],
              ]
-        ).astype(np.float))
+        ).astype(np.float64))
 
     def max_iou(self, grs):
         """
@@ -421,8 +492,9 @@ def detect_grasps(q_img, ang_img, width_img=None, no_grasps=1):
     :param no_grasps: Max number of grasps to return
     :return: list of Grasps
     """
-    local_max = peak_local_max(q_img, min_distance=20, threshold_abs=0.2, num_peaks=no_grasps)
-
+    # print(q_img.min(), q_img.max())
+    local_max = peak_local_max(q_img, min_distance=20, threshold_abs=0.01, num_peaks=no_grasps)
+    # print(len(local_max))
     grasps = []
     for grasp_point_array in local_max:
         grasp_point = tuple(grasp_point_array)
@@ -435,5 +507,4 @@ def detect_grasps(q_img, ang_img, width_img=None, no_grasps=1):
             g.width = g.length/2
 
         grasps.append(g)
-
     return grasps

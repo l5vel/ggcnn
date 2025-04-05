@@ -34,14 +34,14 @@ def parse_args():
     parser.add_argument('--dataset-path', type=str, help='Path to dataset')
     parser.add_argument('--use-depth', type=int, default=1, help='Use Depth image for training (1/0)')
     parser.add_argument('--use-rgb', type=int, default=0, help='Use RGB image for training (0/1)')
-    parser.add_argument('--split', type=float, default=0.9, help='Fraction of data for training (remainder is validation)')
+    parser.add_argument('--split', type=float, default=0.8, help='Fraction of data for training (remainder is validation)')
     parser.add_argument('--ds-rotate', type=float, default=0.0,
                         help='Shift the start point of the dataset to use a different test/train split for cross validation.')
     parser.add_argument('--num-workers', type=int, default=8, help='Dataset workers')
 
     parser.add_argument('--batch-size', type=int, default=8, help='Batch size')
     parser.add_argument('--epochs', type=int, default=50, help='Training epochs')
-    parser.add_argument('--batches-per-epoch', type=int, default=1000, help='Batches per Epoch')
+    parser.add_argument('--batches-per-epoch', type=int, default=500, help='Batches per Epoch')
     parser.add_argument('--val-batches', type=int, default=250, help='Validation Batches')
 
     # Logging etc.
@@ -98,7 +98,9 @@ def validate(net, device, val_data, batches_per_epoch):
 
                 q_out, ang_out, w_out = post_process_output(lossd['pred']['pos'], lossd['pred']['cos'],
                                                             lossd['pred']['sin'], lossd['pred']['width'])
-
+                
+                print(min(q_out), max(q_out), min(ang_out), max(ang_out), min(w_out), max(w_out))
+                
                 s = evaluation.calculate_iou_match(q_out, ang_out,
                                                    val_data.dataset.get_gtbb(didx, rot, zoom_factor),
                                                    no_grasps=1,

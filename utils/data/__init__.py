@@ -5,5 +5,8 @@ def get_dataset(dataset_name):
     elif dataset_name == 'jacquard':
         from .jacquard_data import JacquardDataset
         return JacquardDataset
+    elif dataset_name == 'nbmod':
+        from .nbmod_data import NBModDataset
+        return NBModDataset
     else:
         raise NotImplementedError('Dataset Type {} is Not implemented'.format(dataset_name))

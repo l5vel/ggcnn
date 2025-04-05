@@ -57,14 +57,17 @@ def calculate_iou_match(grasp_q, grasp_angle, ground_truth_bbs, no_grasps=1, gra
     :param grasp_width: (optional) Width output from GG-CNN
     :return: success
     """
-
     if not isinstance(ground_truth_bbs, GraspRectangles):
         gt_bbs = GraspRectangles.load_from_array(ground_truth_bbs)
     else:
         gt_bbs = ground_truth_bbs
+    
     gs = detect_grasps(grasp_q, grasp_angle, width_img=grasp_width, no_grasps=no_grasps)
     for g in gs:
-        if g.max_iou(gt_bbs) > 0.25:
+        # print(g)
+        curr_iou = g.max_iou(gt_bbs)
+        # print("curr_iou: ", curr_iou) 
+        if curr_iou > 0.25:
             return True
     else:
         return False
