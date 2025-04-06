@@ -46,7 +46,7 @@ if __name__ == '__main__':
     args = parse_args()
 
     # Load Network
-    net = torch.load(args.network)
+    net = torch.load(args.network, weights_only=False)
     device = torch.device("cuda:0")
 
     # Load Dataset

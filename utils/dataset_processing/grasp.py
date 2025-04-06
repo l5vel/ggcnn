@@ -158,11 +158,11 @@ class GraspRectangles:
             y = y * 1
             # print("prior: ", width, height)
             width = float(width)
-            width = width * 1
+            width = width
             height = float(height)
-            height = height * 1
-            # print("post: ", width, height)
-            angle = -float(angle)
+            height = height
+            # print(post: ", width, height)
+            angle = float(angle)
             if height > width:
                 exchange = width
                 width = height

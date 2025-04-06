@@ -13,7 +13,7 @@ class NBModDataset(GraspDatasetBase):
     def __init__(self, file_path, start=0.0, end=1.0, ds_rotate=0, **kwargs):
         """
         :param file_path: NBMOD Dataset directory.
-        :param start: If splitting the dataset, start at this fraction [0,1]
+        :param start: If splitting timg.shapehe dataset, start at this fraction [0,1]
         :param end: If splitting the dataset, finish at this fraction
         :param ds_rotate: If splitting the dataset, rotate the list of items by this fraction first
         :param kwargs: kwargs for GraspDatasetBase
@@ -39,20 +39,30 @@ class NBModDataset(GraspDatasetBase):
         self.depth_files = depthf[int(l*start):int(l*end)]
         self.rgb_files = rgbf[int(l*start):int(l*end)]
 
+    def _get_crop_attrs(self, idx):
+        gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
+        center = gtbbs.center
+        left = max(0, min(center[1] - self.output_size // 2, 640 - self.output_size))
+        top = max(0, min(center[0] - self.output_size // 2, 480 - self.output_size))
+        return center, left, top
+    
     def get_gtbb(self, idx, rot=0, zoom=1.0):
         gtbbs = grasp.GraspRectangles.load_from_xml_file(fname = self.grasp_files[idx])
-        c = self.output_size//2
+        center, left, top = self._get_crop_attrs(idx)
         rot = rot.item() if torch.is_tensor(rot) else float(rot)
         zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-        gtbbs.rotate(rot, (c, c))
-        gtbbs.zoom(zoom, (c, c))
+        gtbbs.rotate(rot, center)
+        gtbbs.offset((-top, -left))
+        gtbbs.zoom(zoom, (self.output_size//2, self.output_size//2))
         return gtbbs
 
     def get_depth(self, idx, rot=0, zoom=1.0):
         depth_img = image.DepthImage.from_tiff(self.depth_files[idx])
+        center, left, top = self._get_crop_attrs(idx)
         rot = rot.item() if torch.is_tensor(rot) else float(rot)
         zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-        depth_img.rotate(rot)
+        depth_img.rotate(rot, center)
+        depth_img.crop((top, left), (min(480, top + self.output_size), min(640, left + self.output_size)))
         depth_img.normalise()
         depth_img.zoom(zoom)
         depth_img.resize((self.output_size, self.output_size))
@@ -60,9 +70,11 @@ class NBModDataset(GraspDatasetBase):
 
     def get_rgb(self, idx, rot=0, zoom=1.0, normalise=True):
         rgb_img = image.Image.from_file(self.rgb_files[idx])
+        center, left, top = self._get_crop_attrs(idx)
         rot = rot.item() if torch.is_tensor(rot) else float(rot)
         zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-        rgb_img.rotate(rot)
+        rgb_img.rotate(rot, center)
+        rgb_img.crop((top, left), (min(480, top + self.output_size), min(640, left + self.output_size)))
         rgb_img.zoom(zoom)
         rgb_img.resize((self.output_size, self.output_size))
         if normalise:
