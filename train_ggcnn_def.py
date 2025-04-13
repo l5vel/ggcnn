@@ -30,19 +30,19 @@ def parse_args():
     parser.add_argument('--network', type=str, default='ggcnn', help='Network Name in .models')
 
     # Dataset & Data & Training
-    parser.add_argument('--dataset', type=str, default = 'nbmod', help='Dataset Name ("cornell" or "jaquard")')
-    parser.add_argument('--dataset-path', type=str, default = None, help='Path to dataset')
+    parser.add_argument('--dataset', type=str, help='Dataset Name ("cornell" or "jaquard")')
+    parser.add_argument('--dataset-path', type=str, help='Path to dataset')
     parser.add_argument('--use-depth', type=int, default=1, help='Use Depth image for training (1/0)')
     parser.add_argument('--use-rgb', type=int, default=0, help='Use RGB image for training (0/1)')
     parser.add_argument('--split', type=float, default=0.9, help='Fraction of data for training (remainder is validation)')
-    parser.add_argument('--ds-rotate', type=float, default=90.0,
+    parser.add_argument('--ds-rotate', type=float, default=0.0,
                         help='Shift the start point of the dataset to use a different test/train split for cross validation.')
-    parser.add_argument('--num-workers', type=int, default=4, help='Dataset workers')
+    parser.add_argument('--num-workers', type=int, default=8, help='Dataset workers')
 
-    parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
-    parser.add_argument('--epochs', type=int, default=5000, help='Training epochs')
-    parser.add_argument('--batches-per-epoch', type=int, default=450, help='Batches per Epoch')
-    parser.add_argument('--val-batches', type=int, default=3200, help='Validation Batches')
+    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
+    parser.add_argument('--epochs', type=int, default=2500, help='Training epochs')
+    parser.add_argument('--batches-per-epoch', type=int, default=900, help='Batches per Epoch')
+    parser.add_argument('--val-batches', type=int, default=250, help='Validation Batches')
 
     # Logging etc.
     parser.add_argument('--description', type=str, default='', help='Training description')
@@ -63,9 +63,7 @@ def validate(net, device, val_data, batches_per_epoch):
     :param batches_per_epoch: Number of batches to run
     :return: Successes, Failures and Losses
     """
-    # net.module.eval()
     net.eval()
-
 
     results = {
         'correct': 0,
@@ -88,16 +86,9 @@ def validate(net, device, val_data, batches_per_epoch):
 
                 xc = x.to(device)
                 yc = [yy.to(device) for yy in y]
-                lossd = net(xc, yc)
+                lossd = net.compute_loss(xc, yc)
 
-                loss = []
-                loss_tensor = lossd['loss']
-
-                if isinstance(loss_tensor, torch.Tensor):
-                    loss = loss_tensor.mean()
-                else:
-                    loss = loss_tensor
-                print("loss_val: " ,loss)
+                loss = lossd['loss']
 
                 results['loss'] += loss.item()/ld
                 for ln, l in lossd['losses'].items():
@@ -107,9 +98,7 @@ def validate(net, device, val_data, batches_per_epoch):
 
                 q_out, ang_out, w_out = post_process_output(lossd['pred']['pos'], lossd['pred']['cos'],
                                                             lossd['pred']['sin'], lossd['pred']['width'])
-                
-                # print(min(q_out), max(q_out))
-                
+
                 s = evaluation.calculate_iou_match(q_out, ang_out,
                                                    val_data.dataset.get_gtbb(didx, rot, zoom_factor),
                                                    no_grasps=1,
@@ -124,7 +113,7 @@ def validate(net, device, val_data, batches_per_epoch):
     return results
 
 
-def train(epoch, net, device, train_data, optimizer, batches_per_epoch, vis=True):
+def train(epoch, net, device, train_data, optimizer, batches_per_epoch, vis=False):
     """
     Run one training epoch
     :param epoch: Current epoch
@@ -142,8 +131,8 @@ def train(epoch, net, device, train_data, optimizer, batches_per_epoch, vis=True
         }
     }
 
-    # net.module.train()
     net.train()
+
     batch_idx = 0
     # Use batches per epoch to make training on different sized datasets (cornell/jacquard) more equivalent.
     while batch_idx < batches_per_epoch:
@@ -154,10 +143,9 @@ def train(epoch, net, device, train_data, optimizer, batches_per_epoch, vis=True
 
             xc = x.to(device)
             yc = [yy.to(device) for yy in y]
-            lossd = net(xc, yc)
+            lossd = net.compute_loss(xc, yc)
 
             loss = lossd['loss']
-            # print(loss)
 
             if batch_idx % 100 == 0:
                 logging.info('Epoch: {}, Batch: {}, Loss: {:0.4f}'.format(epoch, batch_idx, loss.item()))
@@ -208,25 +196,19 @@ def run():
     tb = tensorboardX.SummaryWriter(os.path.join(args.logdir, net_desc))
 
     # Load Dataset
-    # logging.info('Loading {} Dataset...'.format(args.dataset.title()))
+    logging.info('Loading {} Dataset...'.format(args.dataset.title()))
     Dataset = get_dataset(args.dataset)
-    if args.dataset_path is None:
-        dataset_path = '/home/data/maa1446/nbmod/a_bunch_of_bananas'
-    else:
-        dataset_path = args.dataset_path
-    train_dataset = Dataset(dataset_path, start=0.0, end=args.split, ds_rotate=args.ds_rotate,
+
+    train_dataset = Dataset(args.dataset_path, start=0.0, end=args.split, ds_rotate=args.ds_rotate,
                             random_rotate=True, random_zoom=True,
                             include_depth=args.use_depth, include_rgb=args.use_rgb)
-    
-    # train_dataset.show_image_with_gtbbs(48)
-    
     train_data = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers
     )
-    val_dataset = Dataset(dataset_path, start=args.split, end=1.0, ds_rotate=args.ds_rotate,
+    val_dataset = Dataset(args.dataset_path, start=args.split, end=1.0, ds_rotate=args.ds_rotate,
                           random_rotate=True, random_zoom=True,
                           include_depth=args.use_depth, include_rgb=args.use_rgb)
     val_data = torch.utils.data.DataLoader(
@@ -236,27 +218,14 @@ def run():
         num_workers=args.num_workers
     )
     logging.info('Done')
-    
+
     # Load the network
     logging.info('Loading Network...')
     input_channels = 1*args.use_depth + 3*args.use_rgb
     ggcnn = get_network(args.network)
 
     net = ggcnn(input_channels=input_channels)
-
-    # Set visible devices (excluding GPU 0)
-    dev_id = 2
-    torch.cuda.set_device(dev_id)  # Set the primary device (not device 0)
-    available_devices = list(range(torch.cuda.device_count()))
-    device_ids = [i for i in available_devices if i != 0 or i != 1]
-    device = torch.device(f"cuda:{device_ids[dev_id]}")  # Set the main GPU (not 0)
-    # # Enable multi-GPU training
-    # if len(device_ids) > 1:
-    #     logging.info(f"Using {len(device_ids)} GPUs: {device_ids}")
-    #     net = torch.nn.DataParallel(net, device_ids=device_ids)
-    # else:
-    #     logging.info(f"Using single GPU: {main_device_id}")
-
+    device = torch.device("cuda:1")
     net = net.to(device)
     optimizer = optim.Adam(net.parameters())
     logging.info('Done')
@@ -295,7 +264,6 @@ def run():
         iou = test_results['correct'] / (test_results['correct'] + test_results['failed'])
         if iou > best_iou or epoch == 0 or (epoch % 10) == 0:
             torch.save(net, os.path.join(save_folder, 'epoch_%02d_iou_%0.2f' % (epoch, iou)))
-            # torch.save(net.module.state_dict(), os.path.join(save_folder, 'epoch_%02d_iou_%0.2f_statedict.pt' % (epoch, iou)))
             torch.save(net.state_dict(), os.path.join(save_folder, 'epoch_%02d_iou_%0.2f_statedict.pt' % (epoch, iou)))
             best_iou = iou
 

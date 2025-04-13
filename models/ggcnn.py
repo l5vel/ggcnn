@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import torch 
 
 filter_sizes = [32, 16, 8, 8, 16, 32]
 kernel_sizes = [9, 5, 3, 3, 5, 9]
@@ -29,7 +30,68 @@ class GGCNN(nn.Module):
             if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
                 nn.init.xavier_uniform_(m.weight, gain=1)
 
-    def forward(self, x):
+    def forward(self, xc, yc=None):
+        if yc is not None:
+            return self.compute_loss(xc, yc)
+        else:
+            return self.original_forward(xc)
+    
+    def compute_loss(self, xc, yc):
+        """
+        Computes the loss for GG-CNN grasp prediction.
+
+        Args:
+            xc (torch.Tensor): Input images.
+            yc (tuple): Tuple of target grasp parameters (y_pos, y_cos, y_sin, y_width).
+
+        Returns:
+            dict: A dictionary containing the total loss, individual losses, and predictions.
+        """
+
+        y_pos, y_cos, y_sin, y_width = yc
+
+        # 1. Get Predictions
+        pos_pred, cos_pred, sin_pred, width_pred = self.original_forward(xc)
+
+        # 2. Calculate Individual Losses
+        # Ensure targets are same dtype as predictions
+        y_pos = y_pos.type_as(pos_pred).to(pos_pred.device)
+        y_cos = y_cos.type_as(cos_pred).to(cos_pred.device)
+        y_sin = y_sin.type_as(sin_pred).to(sin_pred.device)
+        y_width = y_width.type_as(width_pred).to(width_pred.device)
+        
+        p_loss = F.mse_loss(pos_pred, y_pos, reduction='mean')  # Explicit mea
+        cos_loss = F.mse_loss(cos_pred, y_cos, reduction='mean')
+        sin_loss = F.mse_loss(sin_pred, y_sin, reduction='mean')
+        width_loss = F.mse_loss(width_pred, y_width, reduction='mean')
+        # 3. Combine Losses
+        total_loss = p_loss + cos_loss + sin_loss + width_loss
+
+        # 4. Construct Output Dictionary
+        loss_dict = {
+            'loss': total_loss.mean(),  # Mean for DataParallel
+            'losses': {
+                'p_loss': p_loss.mean(),
+                'cos_loss': cos_loss.mean(),
+                'sin_loss': sin_loss.mean(),
+                'width_loss': width_loss.mean()
+            },
+            'pred': {
+                'pos': pos_pred,
+                'cos': cos_pred,
+                'sin': sin_pred,
+                'width': width_pred
+            }
+        }
+
+        # 5. Ensure Device Consistency (Critical!)
+        for key, value in loss_dict.items():
+            if isinstance(value, torch.Tensor):
+                loss_dict[key] = value.to(xc.device)  # Move to input device
+
+        return loss_dict
+
+    def original_forward(self, x):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
@@ -43,28 +105,3 @@ class GGCNN(nn.Module):
         width_output = self.width_output(x)
 
         return pos_output, cos_output, sin_output, width_output
-
-    def compute_loss(self, xc, yc):
-        y_pos, y_cos, y_sin, y_width = yc
-        pos_pred, cos_pred, sin_pred, width_pred = self(xc)
-
-        p_loss = F.mse_loss(pos_pred, y_pos)
-        cos_loss = F.mse_loss(cos_pred, y_cos)
-        sin_loss = F.mse_loss(sin_pred, y_sin)
-        width_loss = F.mse_loss(width_pred, y_width)
-
-        return {
-            'loss': p_loss + cos_loss + sin_loss + width_loss,
-            'losses': {
-                'p_loss': p_loss,
-                'cos_loss': cos_loss,
-                'sin_loss': sin_loss,
-                'width_loss': width_loss
-            },
-            'pred': {
-                'pos': pos_pred,
-                'cos': cos_pred,
-                'sin': sin_pred,
-                'width': width_pred
-            }
-        }
