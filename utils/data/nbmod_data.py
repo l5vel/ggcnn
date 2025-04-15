@@ -46,8 +46,6 @@ class NBModDataset(GraspDatasetBase):
         self.depth_files = depthf[int(l*start):int(l*end)]
         self.rgb_files = rgbf[int(l*start):int(l*end)]
 
-
-
     def get_gtbb(self, idx, rot=0, zoom=1.0):
         gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
         c = self.output_size//2
@@ -57,75 +55,58 @@ class NBModDataset(GraspDatasetBase):
         gtbbs.zoom(zoom, (c, c))
         return gtbbs
 
-    def get_depth(self, idx, rot=0, zoom=1.0):
-        depth_img = image.DepthImage.from_tiff(self.depth_files[idx])
-        rot = rot.item() if torch.is_tensor(rot) else float(rot)
-        zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-        depth_img.rotate(rot)
-        depth_img.normalise()
-        depth_img.zoom(zoom)
-        depth_img.resize((self.output_size, self.output_size))
-        return depth_img.img
-
-    def get_rgb(self, idx, rot=0, zoom=1.0, normalise=True):
-        rgb_img = image.Image.from_file(self.rgb_files[idx])
-        rot = rot.item() if torch.is_tensor(rot) else float(rot)
-        zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-        rgb_img.rotate(rot)
-        rgb_img.zoom(zoom)
-        rgb_img.resize((self.output_size, self.output_size))
-        if normalise:
-            rgb_img.normalise()
-            rgb_img.img = rgb_img.img.transpose((2, 0, 1))
-        return rgb_img.img
-
     def get_jname(self, idx):
         return '_'.join(self.grasp_files[idx].split(os.sep)[-1].split('_')[:-1])
 
-    # def _get_crop_attrs(self, idx):
-    #     gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
-    #     center = gtbbs.center
-    #     print(self.output_size)
-    #     left = max(0, min(center[1] - self.output_size // 2, 640 - self.output_size))
-    #     top = max(0, min(center[0] - self.output_size // 2, 480 - self.output_size))
-    #     print(center, left, top)
-    #     return center, left, top
-    
-    # def get_gtbb(self, idx, rot=0, zoom=1.0):
-    #     gtbbs = grasp.GraspRectangles.load_from_xml_file(fname = self.grasp_files[idx])
-    #     center, left, top = self._get_crop_attrs(idx)
-    #     rot = rot.item() if torch.is_tensor(rot) else float(rot)
-    #     zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-    #     # gtbbs.rotate(rot, center)
-    #     # gtbbs.offset((-top, -left))
-    #     gtbbs.zoom(zoom, (self.output_size//2, self.output_size//2))
-    #     return gtbbs
 
-    # def get_depth(self, idx, rot=0, zoom=1.0):
-    #     depth_img = image.DepthImage.from_tiff(self.depth_files[idx])
-    #     center, left, top = self._get_crop_attrs(idx)
-    #     rot = rot.item() if torch.is_tensor(rot) else float(rot)
-    #     zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-    #     depth_img.rotate(rot, center)
-    #     depth_img.crop((top, left), (min(480, top + self.output_size), min(640, left + self.output_size)))
-    #     depth_img.normalise()
-    #     depth_img.zoom(zoom)
-    #     depth_img.resize((self.output_size, self.output_size))
-    #     return depth_img.img
+    def _get_crop_attrs(self, idx):
+        gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
 
-    # def get_rgb(self, idx, rot=0, zoom=1.0, normalise=True):
-    #     rgb_img = image.Image.from_file(self.rgb_files[idx])
-    #     center, left, top = self._get_crop_attrs(idx)
-    #     rot = rot.item() if torch.is_tensor(rot) else float(rot)
-    #     zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
-    #     rgb_img.rotate(rot, center)
-    #     rgb_img.crop((top, left), (min(480, top + self.output_size), min(640, left + self.output_size)))
-    #     rgb_img.zoom(zoom)
-    #     rgb_img.resize((self.output_size, self.output_size))
-    #     if normalise:
-    #         rgb_img.normalise()
-    #         rgb_img.img = rgb_img.img.transpose((2, 0, 1))
-    #     return rgb_img.img
+        center = gtbbs.center  # Center of the grasp
+        crop_size_half = self.output_size // 2
+
+        # Calculate top-left corner of the crop
+        left = int(center[0] - crop_size_half)
+        top = int(center[1] - crop_size_half)
+
+        # Ensure the crop stays within the image boundaries
+        left = max(0, min(left, 640 - self.output_size))
+        top = max(0, min(top, 480 - self.output_size))
+
+        return center, round(left), round(top)
+
+    def get_depth(self, idx, rot=0, zoom=1.0):
+        depth_img = image.DepthImage.from_tiff(self.depth_files[idx])
+        center, left, top = self._get_crop_attrs(idx)
+        depth_img.rotate(rot, center)
+        cropped_img = depth_img.img[round(top):round(min(480, top + self.output_size)), round(left):round(min(640, left + self.output_size))]
+        depth_image = image.DepthImage(cropped_img) # Wrap the numpy array back into a DepthImage object for normalization and resizing
+        depth_image.normalise()
+        depth_image.zoom(zoom)
+        depth_image.resize((self.output_size, self.output_size))
+        return depth_image.img
+
+    def get_rgb(self, idx, rot=0, zoom=1.0, normalise=False):
+        rgb_img = image.Image.from_file(self.rgb_files[idx])
+        center, left, top = self._get_crop_attrs(idx)
+        rot = rot.item() if torch.is_tensor(rot) else float(rot)
+        zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
+        rgb_img.rotate(rot, center)
+        cropped_img = rgb_img.img[round(top):round(min(480, top + self.output_size)), round(left):round(min(640, left + self.output_size))]
+        rgb_image = image.Image(cropped_img) # Wrap the numpy array back into an Image object for zooming and resizing
+        rgb_image.zoom(zoom)
+        rgb_image.resize((self.output_size, self.output_size))
+        if normalise:
+            rgb_image.normalise()
+            # Check the shape after normalization and transpose to (H, W, C)
+            if rgb_image.img.shape == (self.output_size, 3, self.output_size):
+                return rgb_image.img.transpose(0, 2, 1)
+            elif rgb_image.img.shape[0] == 3:
+                return rgb_image.img.transpose(1, 2, 0)
+            else:
+                return rgb_image.img
+        else:
+            return rgb_image.img# Already likely (H, W, C) after loading and cropping
 
     # def get_jname(self, idx):
     #     return '_'.join(self.grasp_files[idx].split(os.sep)[-1].split('_')[:-1])
@@ -156,6 +137,17 @@ class NBModDataset(GraspDatasetBase):
         plt.show()
 
     
+    def get_cropped_depth(self, idx):
+        depth_img = image.DepthImage.from_tiff(self.depth_files[idx])
+        center, left, top = self._get_crop_attrs(idx)
+        cropped_img = depth_img.img[top:min(480, top + self.output_size), left:min(640, left + self.output_size)]
+        return cropped_img
+
+    def get_cropped_rgb(self, idx):
+        rgb_img = image.Image.from_file(self.rgb_files[idx])
+        center, left, top = self._get_crop_attrs(idx)
+        cropped_img = rgb_img.img[top:min(480, top + self.output_size), left:min(640, left + self.output_size)]
+        return cropped_img
     
     def show_tiff_with_gtbbs(self, idx, rot=0, zoom=1.0):
         """

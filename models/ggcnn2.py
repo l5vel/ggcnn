@@ -59,6 +59,7 @@ class GGCNN2(nn.Module):
             return self.compute_loss(xc, yc)
         else:
             return self.original_forward(xc)
+    
     def compute_loss(self, xc, yc):
         """
         Computes the loss for GG-CNN grasp prediction.
