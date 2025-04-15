@@ -97,7 +97,7 @@ def validate(net, device, val_data, batches_per_epoch):
                     loss = loss_tensor.mean()
                 else:
                     loss = loss_tensor
-                print("loss_val: " ,loss)
+                # print("loss_val: " ,loss)
 
                 results['loss'] += loss.item()/ld
                 for ln, l in lossd['losses'].items():

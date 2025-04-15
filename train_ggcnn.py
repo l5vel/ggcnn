@@ -97,7 +97,7 @@ def validate(net, device, val_data, batches_per_epoch):
                     loss = loss_tensor.mean()
                 else:
                     loss = loss_tensor
-                print("loss_val: " ,loss)
+                #print("loss_val: " ,loss)
 
                 results['loss'] += loss.item()/ld
                 for ln, l in lossd['losses'].items():
@@ -245,7 +245,7 @@ def run():
     net = ggcnn(input_channels=input_channels)
 
     # Set visible devices (excluding GPU 0)
-    dev_id = 2
+    dev_id = 3
     torch.cuda.set_device(dev_id)  # Set the primary device (not device 0)
     available_devices = list(range(torch.cuda.device_count()))
     device_ids = [i for i in available_devices if i != 0 or i != 1]

@@ -8,7 +8,7 @@ from PIL import Image
 import numpy as np
 
 # --- Configuration ---    
-dataset_path = '/home/data/maa1446/nbmod/combined'
+dataset_path = '/home/data/maa1446/nbmod/Simple-Single_Subset'
 
 output_size = 300  # Ensure this matches your desired crop size
 
@@ -29,7 +29,7 @@ def add_rotated_rectangle(ax, center, width, height, angle, edgecolor='red'):
     ax.add_patch(rect)
 
 # --- Verification Loop ---
-num_samples_to_verify = [600]  # Adjust as needed
+num_samples_to_verify = [0]  # Adjust as needed
 
 for i in num_samples_to_verify:
     try:

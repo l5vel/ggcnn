@@ -7,6 +7,12 @@ from models.common import post_process_output
 from utils.dataset_processing import evaluation, grasp
 from utils.data import get_dataset
 
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import matplotlib.transforms as transforms
+import cv2
+import numpy as np
+
 logging.basicConfig(level=logging.INFO)
 
 
@@ -42,6 +48,15 @@ def parse_args():
     return args
 
 
+# --- Function to add rotated rectangle (already in your class) ---
+def add_rotated_rectangle(ax, center, width, height, angle, edgecolor='red'):
+    cx, cy = center
+    lower_left = (cx - width / 2, cy - height / 2)
+    rect = patches.Rectangle(lower_left, width, height, fill=False, edgecolor=edgecolor, linewidth=2)
+    transform = transforms.Affine2D().rotate_deg_around(cx, cy, angle)
+    rect.set_transform(transform + ax.transData)
+    ax.add_patch(rect)
+
 if __name__ == '__main__':
     args = parse_args()
 
@@ -72,6 +87,7 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         for idx, (x, y, didx, rot, zoom) in enumerate(test_data):
+
             logging.info('Processing {}/{}'.format(idx+1, len(test_data)))
             xc = x.to(device)
             yc = [yi.to(device) for yi in y]
@@ -98,9 +114,11 @@ if __name__ == '__main__':
                         f.write(g.to_jacquard(scale=1024 / 300) + '\n')
 
             if args.vis:
+                gt_bboxes_original = test_data.dataset.get_gtbb(didx, rot=0, zoom=1.0)
+                # print(gt_bboxes_original)
                 evaluation.plot_output(test_data.dataset.get_rgb(didx, rot, zoom, normalise=False),
                                        test_data.dataset.get_depth(didx, rot, zoom), q_img,
-                                       ang_img, no_grasps=args.n_grasps, grasp_width_img=width_img)
+                                       ang_img, no_grasps=args.n_grasps, grasp_width_img=width_img, ground_truth_bbs=gt_bboxes_original)
 
     if args.iou_eval:
         logging.info('IOU Results: %d/%d = %f' % (results['correct'],

@@ -53,6 +53,16 @@ class NBModDataset(GraspDatasetBase):
         zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
         gtbbs.rotate(rot, (c, c))
         gtbbs.zoom(zoom, (c, c))
+
+        center, left, top = self._get_crop_attrs(idx)
+        # print("center, left, top  ", center, left, top)
+        # print("GT Original")
+        # for bb in gtbbs:
+        #     print(bb.center, bb.width, bb.length, bb.angle)
+        gtbbs.offset((-left, -top))
+        # print("GT Cropped")
+        # for bb in gtbbs:
+        #     print(bb.center, bb.width, bb.length, bb.angle)
         return gtbbs
 
     def get_jname(self, idx):
@@ -78,7 +88,7 @@ class NBModDataset(GraspDatasetBase):
     def get_depth(self, idx, rot=0, zoom=1.0):
         depth_img = image.DepthImage.from_tiff(self.depth_files[idx])
         center, left, top = self._get_crop_attrs(idx)
-        depth_img.rotate(rot, center)
+        #depth_img.rotate(rot, center)
         cropped_img = depth_img.img[round(top):round(min(480, top + self.output_size)), round(left):round(min(640, left + self.output_size))]
         depth_image = image.DepthImage(cropped_img) # Wrap the numpy array back into a DepthImage object for normalization and resizing
         depth_image.normalise()
