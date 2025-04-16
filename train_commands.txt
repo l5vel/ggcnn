@@ -1,0 +1,4 @@
+
+# Using 6 devices: if all needed change the visible devices and --nproc
+
+CUDA_VISIBLE_DEVICES=1,2,4,5,6,7 torchrun --nproc_per_node=6 --master_addr="localhost" --master_port=12355 train_ggcnn_cudann.py --dataset 'nbmod' --dataset-path '/home/data/maa1446/nbmod/combined/'

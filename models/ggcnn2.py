@@ -93,12 +93,12 @@ class GGCNN2(nn.Module):
 
         # 4. Construct Output Dictionary
         loss_dict = {
-            'loss': total_loss.mean(),  # Mean for DataParallel
+            'loss': total_loss,  # This should already be a scalar
             'losses': {
-                'p_loss': p_loss.mean(),
-                'cos_loss': cos_loss.mean(),
-                'sin_loss': sin_loss.mean(),
-                'width_loss': width_loss.mean()
+                'p_loss': p_loss,
+                'cos_loss': cos_loss,
+                'sin_loss': sin_loss,
+                'width_loss': width_loss
             },
             'pred': {
                 'pos': pos_pred,
@@ -107,12 +107,7 @@ class GGCNN2(nn.Module):
                 'width': width_pred
             }
         }
-
-        # 5. Ensure Device Consistency (Critical!)
-        for key, value in loss_dict.items():
-            if isinstance(value, torch.Tensor):
-                loss_dict[key] = value.to(xc.device)  # Move to input device
-
+        print(loss_dict)
         return loss_dict
 
     def original_forward(self, x): # Create a function for the original forward pass.

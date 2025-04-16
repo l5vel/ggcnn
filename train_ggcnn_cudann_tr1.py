@@ -23,6 +23,8 @@ from models.common import post_process_output
 
 logging.basicConfig(level=logging.INFO)
 
+num_devices = 0 #number of cuda devices
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train GG-CNN')
 
@@ -97,7 +99,7 @@ def validate(net, device, val_data, batches_per_epoch):
                     loss = loss_tensor.mean()
                 else:
                     loss = loss_tensor
-                #print("loss_val: " ,loss)
+                # print("loss_val: " ,loss)
 
                 results['loss'] += loss.item()/ld
                 for ln, l in lossd['losses'].items():
@@ -157,16 +159,30 @@ def train(epoch, net, device, train_data, optimizer, batches_per_epoch, vis=True
             lossd = net(xc, yc)
 
             loss = lossd['loss']
-            # print(loss)
+            
+            if isinstance(loss, torch.Tensor):
+                if num_devices > 1:
+                    torch.distributed.reduce(loss, dst=0, op=torch.distributed.ReduceOp.SUM)
+                    loss /= num_devices
+                loss_item = loss.item()
+            else:
+                loss_item = loss
 
             if batch_idx % 100 == 0:
                 logging.info('Epoch: {}, Batch: {}, Loss: {:0.4f}'.format(epoch, batch_idx, loss.item()))
 
             results['loss'] += loss.item()
-            for ln, l in lossd['losses'].items():
+            
+            for ln, l_tensor in lossd['losses'].items():
                 if ln not in results['losses']:
                     results['losses'][ln] = 0
-                results['losses'][ln] += l.item()
+                if isinstance(l_tensor, torch.Tensor):
+                    if num_devices > 1:
+                        torch.distributed.reduce(l_tensor, dst=0, op=torch.distributed.ReduceOp.SUM)
+                        l_tensor /= num_devices
+                    results['losses'][ln] += l_tensor.item()
+                else:
+                    results['losses'][ln] += l_tensor  # Handle non-tensor case if it exists
 
             optimizer.zero_grad()
             loss.backward()
@@ -192,6 +208,7 @@ def train(epoch, net, device, train_data, optimizer, batches_per_epoch, vis=True
 
 
 def run():
+    global num_devices
     args = parse_args()
 
     # Vis window
@@ -244,18 +261,18 @@ def run():
 
     net = ggcnn(input_channels=input_channels)
 
-    # Set visible devices (excluding GPU 0)
-    dev_id = 3
-    torch.cuda.set_device(dev_id)  # Set the primary device (not device 0)
+    dev_id = 1
     available_devices = list(range(torch.cuda.device_count()))
-    device_ids = [i for i in available_devices if i != 0 or i != 1]
-    device = torch.device(f"cuda:{device_ids[dev_id]}")  # Set the main GPU (not 0)
-    # # Enable multi-GPU training
-    # if len(device_ids) > 1:
-    #     logging.info(f"Using {len(device_ids)} GPUs: {device_ids}")
-    #     net = torch.nn.DataParallel(net, device_ids=device_ids)
-    # else:
-    #     logging.info(f"Using single GPU: {main_device_id}")
+    device_ids = [i for i in available_devices if i not in (0, 2)] # ignore 0 and 2
+    num_devices = len(device_ids)
+    # Enable multi-GPU training
+    if len(device_ids) > 1:
+        device = torch.device(f"cuda:{device_ids[0]}")  # Set the main GPU (not 0)
+        logging.info(f"Using {len(device_ids)} GPUs: {device_ids}")
+        net = torch.nn.DataParallel(net, device_ids=device_ids)
+    else:
+        torch.cuda.set_device(dev_id)  # Set the primary device (not device 0)
+        logging.info(f"Using single GPU: {dev_id}")
 
     net = net.to(device)
     optimizer = optim.Adam(net.parameters())
