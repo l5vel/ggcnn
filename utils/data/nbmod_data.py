@@ -1,6 +1,7 @@
 import os
 import glob
 import torch
+import numpy as np
 
 from .grasp_data import GraspDatasetBase
 from utils.dataset_processing import grasp, image
@@ -16,37 +17,107 @@ class NBModDataset(GraspDatasetBase):
     """
     Dataset wrapper for the NBMOD dataset.
     """
-    def __init__(self, file_path, start=0.0, end=1.0, ds_rotate=0, **kwargs):
+    def __init__(self, file_path, start=0.0, end=1.0, ds_rotate=0, shuffle_seed=None, **kwargs):
         """
         :param file_path: NBMOD Dataset directory.
-        :param start: If splitting timg.shapehe dataset, start at this fraction [0,1]
+        :param start: If splitting the dataset, start at this fraction [0,1]
         :param end: If splitting the dataset, finish at this fraction
         :param ds_rotate: If splitting the dataset, rotate the list of items by this fraction first
+        :param shuffle_seed: Seed for random shuffling to ensure consistency between train/val
         :param kwargs: kwargs for GraspDatasetBase
         """
         super(NBModDataset, self).__init__(**kwargs)
-        # print("file_path: ",file_path)
         grasp_path = os.path.join(file_path, 'label')
-        # print("grasp_path: ",grasp_path)
         graspf = glob.glob(os.path.join(grasp_path, '*r.xml'))
-        graspf.sort()
+        graspf.sort()  # Initial sort for deterministic order
         l = len(graspf)
-
+        print("Number of grasp files found: ", l)
         if l == 0:
             raise FileNotFoundError('No dataset files found. Check path: {}'.format(file_path))
-
-        if ds_rotate:
+        
+        # Use consistent shuffling with the provided seed
+        if shuffle_seed is not None:
+            import random
+            # Create a new Random instance with the seed
+            rng = random.Random(shuffle_seed)
+            # Create a copy before shuffling to avoid modifying the original list
+            graspf_copy = graspf.copy()
+            rng.shuffle(graspf_copy)
+            graspf = graspf_copy
+        elif ds_rotate:
             graspf = graspf[int(l*ds_rotate):] + graspf[:int(l*ds_rotate)]
-
+            
         # Corrected the path replacement logic to match the files
         depthf = [f.replace('label', 'img').replace('r.xml', 'd.tiff') for f in graspf]
         rgbf = [f.replace('label', 'img').replace('r.xml', 'r.png') for f in graspf]
-        
         self.grasp_files = graspf[int(l*start):int(l*end)]
         self.depth_files = depthf[int(l*start):int(l*end)]
         self.rgb_files = rgbf[int(l*start):int(l*end)]
 
     def get_gtbb(self, idx, rot=0, zoom=1.0):
+        # Load original bounding boxes
+        gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
+        
+        # Get crop parameters
+        center, left, top = self._get_crop_attrs(idx)
+        
+        # Create a copy for transformation
+        transformed_gtbbs = gtbbs.copy()
+        
+        # Convert parameters to float
+        rot = rot.item() if torch.is_tensor(rot) else float(rot)
+        zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
+        
+        # Apply transformations in the EXACT SAME ORDER as in Cornell dataset
+        # 1. Rotate around the center of the original image
+        transformed_gtbbs.rotate(rot, center)
+        
+        # 2. Offset to match cropping
+        transformed_gtbbs.offset((-left, -top))
+        
+        # 3. Zoom from center of crop
+        c = self.output_size // 2
+        transformed_gtbbs.zoom(zoom, (c, c))
+        
+        # Filter bounding boxes to keep only those that are mostly within the image
+        valid_gtbbs = grasp.GraspRectangles()
+        for gr in transformed_gtbbs:
+            # Calculate how many points are in valid range
+            points_in_range = np.sum((gr.points[:, 0] >= 0) & 
+                                    (gr.points[:, 0] < self.output_size) &
+                                    (gr.points[:, 1] >= 0) & 
+                                    (gr.points[:, 1] < self.output_size))
+            
+            # Keep if at least 2 points are in range (half the rectangle)
+            if points_in_range >= 2:
+                # Clone the grasp rectangle
+                adjusted_gr = gr.copy()
+                
+                # Clip the points to valid image coordinates
+                adjusted_gr.points = np.clip(
+                    adjusted_gr.points, 
+                    0, 
+                    self.output_size - 1
+                )
+                
+                valid_gtbbs.append(adjusted_gr)
+        
+        # If we ended up with no valid grasp rectangles, create one in the center
+        if len(valid_gtbbs) == 0:
+            # Create a default grasp in the center
+            center_grasp = grasp.Grasp(
+                (self.output_size//2, self.output_size//2),  # Center
+                0.0,  # Angle
+                60,   # Length
+                30    # Width
+            )
+            valid_gtbbs.append(center_grasp.as_gr)
+            
+            # print(f"Warning: No valid grasp rectangles for image {idx}. Created default.")
+        
+        return valid_gtbbs
+
+    def get_gtbb_crop(self, idx, rot=0, zoom=1.0):
         gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
         c = self.output_size//2
         rot = rot.item() if torch.is_tensor(rot) else float(rot)
@@ -63,6 +134,15 @@ class NBModDataset(GraspDatasetBase):
         # print("GT Cropped")
         # for bb in gtbbs:
         #     print(bb.center, bb.width, bb.length, bb.angle)
+        return gtbbs
+
+    def get_gtbb_org(self, idx, rot=0, zoom=1.0):
+        gtbbs = grasp.GraspRectangles.load_from_xml_file(self.grasp_files[idx])
+        c = self.output_size//2
+        rot = rot.item() if torch.is_tensor(rot) else float(rot)
+        zoom = zoom.item() if torch.is_tensor(zoom) else float(zoom)
+        gtbbs.rotate(rot, (c, c))
+        gtbbs.zoom(zoom, (c, c))
         return gtbbs
 
     def get_jname(self, idx):

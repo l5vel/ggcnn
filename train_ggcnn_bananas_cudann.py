@@ -49,15 +49,15 @@ def parse_args():
     parser.add_argument('--dataset-path', type=str, default = None, help='Path to dataset')
     parser.add_argument('--use-depth', type=int, default=1, help='Use Depth image for training (1/0)')
     parser.add_argument('--use-rgb', type=int, default=0, help='Use RGB image for training (0/1)')
-    parser.add_argument('--split', type=float, default=0.9, help='Fraction of data for training (remainder is validation)')
+    parser.add_argument('--split', type=float, default=0.8, help='Fraction of data for training (remainder is validation)')
     parser.add_argument('--ds-rotate', type=float, default=0.0,
                         help='Shift the start point of the dataset to use a different test/train split for cross validation.')
     parser.add_argument('--num-workers', type=int, default=4, help='Dataset workers')
 
-    parser.add_argument('--batch-size', type=int, default=48, help='Batch size')
+    parser.add_argument('--batch-size', type=int, default=8, help='Batch size')
     parser.add_argument('--epochs', type=int, default=5000, help='Training epochs')
-    parser.add_argument('--batches-per-epoch', type=int, default=657, help='Batches per Epoch')
-    parser.add_argument('--val-batches', type=int, default=3510, help='Validation Batches')
+    parser.add_argument('--batches-per-epoch', type=int, default=7, help='Batches per Epoch')
+    parser.add_argument('--val-batches', type=int, default=15, help='Validation Batches')
 
     # Distributed Training
     parser.add_argument('--world-size', type=int, default=6, help='Number of distributed processes')
@@ -75,7 +75,7 @@ def parse_args():
     return args
 
 
-def validate(net, device, val_data, batches_per_epoch):
+def validate(net, device, val_data, batches_per_epoch, epoch_num=None):
     """
     Run validation.
     :param net: Network
@@ -120,11 +120,14 @@ def validate(net, device, val_data, batches_per_epoch):
 
                 gt_bbs = val_data.dataset.get_gtbb(didx, rot, zoom_factor)
                 # logging.info(f'Number of ground truth bounding boxes: {gt_bbs.num_grasps}')
-                
+                if batch_idx == 1: # only visualize the q_img for the first validation image
+                    vis_q_img = True
+                else:
+                    vis_q_img = False
                 s = evaluation.calculate_iou_match(q_out, ang_out,
                                                    gt_bbs,
                                                    no_grasps=1,
-                                                   grasp_width=w_out)
+                                                   grasp_width=w_out,epoch_num=epoch_num, vis_q_img=vis_q_img)
 
                 if s:
                     results['correct'] += 1
@@ -174,8 +177,7 @@ def train(epoch, net, device, train_data, optimizer, batches_per_epoch, rank=0, 
             else:
                 loss_item = loss
 
-            if batch_idx % 100 == 0 and rank == 0:
-                logging.info(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss_item:0.4f}')
+            logging.info(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss_item:0.4f}')
 
             results['loss'] += loss_item
             for ln, l_tensor in lossd['losses'].items():
@@ -283,7 +285,7 @@ def run():
         dataset_path = args.dataset_path
 
     # Use the same random seed for both dataset instances to ensure consistent shuffling
-    shuffle_seed = 100  # Or any fixed value, or add as a command-line argument
+    shuffle_seed = 42  # Or any fixed value, or add as a command-line argument
 
     train_dataset = Dataset(dataset_path, start=0.0, end=args.split, shuffle_seed=shuffle_seed,
                         random_rotate=True, random_zoom=True,
@@ -361,8 +363,12 @@ def run():
         # Run Validation
         if args.rank == 0:
             logging.info('Validating...')
+            if epoch % 100 == 0:
+                epoch_num = epoch
+            else:
+                epoch_num = None
             test_results = validate(net.module if isinstance(net, torch.nn.parallel.DistributedDataParallel) else net,
-                                    device, val_data, args.val_batches)
+                                    device, val_data, args.val_batches, epoch_num=epoch_num)
             iou = test_results['correct'] / (test_results['correct'] + test_results['failed'])
             logging.info(f'Validation IOU: {iou:.4f} ({test_results["correct"]}/{test_results["correct"] + test_results["failed"]})')
 

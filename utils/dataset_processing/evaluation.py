@@ -89,7 +89,7 @@ def plot_output(rgb_img, depth_img, grasp_q_img, grasp_angle_img, no_grasps=1, g
     
     return None
 
-def calculate_iou_match(grasp_q, grasp_angle, ground_truth_bbs, no_grasps=1, grasp_width=None):
+def calculate_iou_match(grasp_q, grasp_angle, ground_truth_bbs, no_grasps=1, grasp_width=None,epoch_num=None, vis_q_img =False):
     """
     Calculate grasp success using the IoU (Jacquard) metric (e.g. in https://arxiv.org/abs/1301.3592)
     A success is counted if grasp rectangle has a 25% IoU with a ground truth, and is withing 30 degrees.
@@ -105,17 +105,21 @@ def calculate_iou_match(grasp_q, grasp_angle, ground_truth_bbs, no_grasps=1, gra
     else:
         gt_bbs = ground_truth_bbs
     
-    gs = detect_grasps(grasp_q, grasp_angle, width_img=grasp_width, no_grasps=no_grasps)
-    
+    gs = detect_grasps(grasp_q, grasp_angle, width_img=grasp_width, no_grasps=no_grasps, epoch_num=epoch_num, vis_q_img=vis_q_img)
+    # if len(gs) > 0:
+    #     print(f"Number of detected grasps: {len(gs)}")
     # Modified to return more detailed information
     matched_grasps = []
     iou_values = []
-    
+    max_iou = 0
     for g in gs:
         curr_iou = g.max_iou(gt_bbs)
         iou_values.append(curr_iou)
         if curr_iou > 0.25:
             matched_grasps.append(g)
+    if iou_values:  # Check if the list is not empty
+        max_iou = max(iou_values)
+        # print("max iou for current image: ", max(iou_values))
     
     # Print detailed metrics
     # print(f"IoU values: {iou_values}")

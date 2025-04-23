@@ -28,6 +28,9 @@ class GraspRectangles:
         else:
             self.grs = []
 
+    def __len__(self):
+        return len(self.grs)
+
     def __getitem__(self, item):
         return self.grs[item]
 
@@ -261,7 +264,16 @@ class GraspRectangles:
         """
         points = [gr.points for gr in self.grs]
         return np.mean(np.vstack(points), axis=0).astype(np.int32)
-
+    
+    @property
+    def num_grasps(self):
+        """
+        :return: Number of grasps
+        """
+        num = 0
+        for itr in self.grs:
+            num+= 1
+        return num
 
 class GraspRectangle:
     """
@@ -329,32 +341,40 @@ class GraspRectangle:
         return Grasp(self.center, self.angle, self.length/3, self.width).as_gr.polygon_coords(shape)
 
     def iou(self, gr, angle_threshold=np.pi/6):
-        """
-        Compute IoU with another grasping rectangle
-        :param gr: GraspingRectangle to compare
-        :param angle_threshold: Maximum angle difference between GraspRectangles
-        :return: IoU between Grasp Rectangles
-        """
-        if abs((self.angle - gr.angle + np.pi/2) % np.pi - np.pi/2) > angle_threshold:
+        # Print angles for debugging
+        angle_diff = abs((self.angle - gr.angle + np.pi/2) % np.pi - np.pi/2)
+        # print(f"Self angle: {self.angle}, GR angle: {gr.angle}, Diff: {angle_diff}")
+        
+        if angle_diff > angle_threshold:
+            # print("Rejected due to angle threshold")
             return 0
-
+        # Debug rectangle coordinates
+        # print("Rectangle 1 points:")
+        # print(self.points)
+        # print("Rectangle 2 points:")
+        # print(gr.points)
+       
+        # Get coordinates and print their shape
         rr1, cc1 = self.polygon_coords()
         rr2, cc2 = polygon(gr.points[:, 0], gr.points[:, 1])
-        # print("rr1, cc1 rr2, cc2", rr1, cc1, rr2, cc2)
+        # print(f"Polygon 1 coords: {len(rr1)} points, Polygon 2 coords: {len(rr2)} points")
+        
         try:
             r_max = max(rr1.max(), rr2.max()) + 1
             c_max = max(cc1.max(), cc2.max()) + 1
-        except:
+        except Exception as e:
+            print(f"Exception in IOU calculation: {e}")
             return 0
-
+            
         canvas = np.zeros((r_max, c_max))
         canvas[rr1, cc1] += 1
         canvas[rr2, cc2] += 1
+        
         union = np.sum(canvas > 0)
-        if union == 0:
-            return 0
         intersection = np.sum(canvas == 2)
-        return intersection/union
+        
+        # print(f"Intersection: {intersection}, Union: {union}, IOU: {intersection/union if union > 0 else 0}")
+        return intersection/union if union > 0 else 0
 
     def copy(self):
         """
@@ -483,7 +503,62 @@ class Grasp:
         return '%0.2f;%0.2f;%0.2f;%0.2f;%0.2f' % (self.center[1]*scale, self.center[0]*scale, -1*self.angle*180/np.pi, self.length*scale, self.width*scale)
 
 
-def detect_grasps(q_img, ang_img, width_img=None, no_grasps=1):
+def debug_quality_map(q_img, save_path=None):
+    """Debug the quality map to see why no grasps are being detected"""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Show the quality map
+    im1 = ax1.imshow(q_img, cmap='viridis')
+    ax1.set_title("Quality Map (q_img)")
+    plt.colorbar(im1, ax=ax1, label="Quality Value")
+    
+    # Show a histogram of values
+    ax2.hist(q_img.flatten(), bins=50)
+    ax2.set_title("Distribution of Quality Values")
+    ax2.set_xlabel("Quality Value")
+    ax2.set_ylabel("Frequency")
+    ax2.axvline(x=0.2, color='r', linestyle='--', label="Threshold (0.2)")
+    ax2.legend()
+    
+    # Add stats
+    min_val = np.min(q_img)
+    max_val = np.max(q_img)
+    mean_val = np.mean(q_img)
+    median_val = np.median(q_img)
+    above_threshold = np.sum(q_img >= 0.2) / q_img.size * 100
+    
+    stats_text = (
+        f"Min: {min_val:.4f}\n"
+        f"Max: {max_val:.4f}\n"
+        f"Mean: {mean_val:.4f}\n"
+        f"Median: {median_val:.4f}\n"
+        f"Values ≥ 0.2: {above_threshold:.2f}%"
+    )
+    
+    plt.figtext(0.5, 0.01, stats_text, ha="center", fontsize=10,
+                bbox={"facecolor":"lightblue", "alpha":0.5, "pad":5})
+    
+    plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+        print(f"Quality map debug saved to {save_path}")
+    else:
+        plt.show()
+        
+    # Try different thresholds to see if we get any peaks
+    # thresholds = [0.0, 0.05, 0.1, 0.15, 0.2]
+    thresholds = [0.2]
+    for thresh in thresholds:
+        peaks = peak_local_max(q_img, min_distance=20, threshold_abs=thresh, num_peaks=5)
+        print(f"Threshold {thresh}: {len(peaks)} peaks found")
+        if len(peaks) > 0:
+            print(f"  Highest peak value: {q_img[tuple(peaks[0])]:.4f}")
+
+def detect_grasps(q_img, ang_img, width_img=None, no_grasps=1, epoch_num=None, vis_q_img=False):
     """
     Detect grasps in a GG-CNN output.
     :param q_img: Q image network output
@@ -492,7 +567,9 @@ def detect_grasps(q_img, ang_img, width_img=None, no_grasps=1):
     :param no_grasps: Max number of grasps to return
     :return: list of Grasps
     """
-    # print(q_img.min(), q_img.max())
+    # if (epoch_num is not None) and (vis_q_img): # print the q_img after a certain epoch
+    #     print(f"Epoch {epoch_num}: Q image shape: {q_img.shape}")
+    #     debug_quality_map(q_img)
     local_max = peak_local_max(q_img, min_distance=20, threshold_abs=0.2, num_peaks=no_grasps)
     # print(len(local_max))
     grasps = []
