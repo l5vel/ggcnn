@@ -1,3 +1,11 @@
+# Running
+
+To run the training from scratch
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --master_addr="localhost" --master_port=12355 train_ggcnn_bananas_cudann.py --dataset 'nbmod' --dataset-path '/home/data/maa1446/nbmod/a_bunch_of_bananas'
+
+To finetune an existing model using multiple gpus
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --nproc_per_node=8 --master_addr="localhost" --master_port=12355 finetune_cornell_cudann.py 
+
 **Note:** This is a cleaned-up, PyTorch port of the GG-CNN code.  For the original Keras implementation, see the `RSS2018` branch.  
 Main changes are major code clean-ups and documentation, an improved GG-CNN2 model, ability to use the Jacquard dataset and simpler evaluation.    
 
